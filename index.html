@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Control Group of One · prototype</title>
+<style>
+:root{--bg:#f7f1e3;--ink:#1a1a1a;--mut:#555;--or:#e8892b;--bl:#3b6fd4}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Calibri,system-ui,sans-serif}
+main{max-width:760px;margin:0 auto;padding:24px 16px 48px}
+h1{font:800 32px Arial,sans-serif;margin:0}h2{font-size:18px;color:#c8461b;margin:0 0 8px}
+section{background:#fff;border:1.5px solid var(--or);border-radius:12px;padding:16px;margin:16px 0}
+.sub,.mut{color:var(--mut)}.mut{font-size:14px}
+button,select{font:inherit;padding:6px 12px;margin:4px 6px 4px 0;border:1.5px solid var(--bl);border-radius:8px;background:#fff;cursor:pointer}
+textarea{width:100%;height:70px;font:14px monospace;box-sizing:border-box}
+.d{display:inline-block;width:30px;height:30px;line-height:30px;text-align:center;border-radius:6px;margin:2px;color:#fff;font-size:13px}
+.on{background:var(--or)}.off{background:var(--bl)}
+.card{border-left:6px solid var(--mut);padding:8px 14px;background:#faf7ef}.card h3{margin:0;font-size:24px}
+.card.good{border-color:#2e8b57}.card.bad{border-color:#c0392b}
+</style></head><body><main>
+<h1>Control Group of One</h1>
+<p class="sub">Early prototype of the experiment engine. It runs entirely in your browser; nothing is uploaded.</p>
+
+<section><h2>1. Design the experiment</h2>
+<select id="habit"><option>No caffeine after 2 pm</option><option>Screens off 30 min before bed</option><option>10-minute walk after dinner</option></select>
+<button id="gen">Shuffle 18-night plan</button>
+<div id="plan"></div><p class="mut">3 cycles × (3 nights habit on + 3 nights habit off), order shuffled within each cycle so slow drifts (exam stress, a cold) hit both conditions.</p></section>
+
+<section><h2>2. Add your nights</h2>
+<button id="d1">Demo data: habit helps (+40 min)</button><button id="d0">Demo data: no real effect</button>
+<p class="mut">Demo data is synthetic, with a known built-in effect. Or paste one line per night, in plan order: <code>minutes asleep, followed (1 or 0)</code></p>
+<textarea id="csv" placeholder="412,1&#10;398,1&#10;..."></textarea><button id="go">Analyse my data</button></section>
+
+<section id="out" hidden><h2>3. Verdict</h2><div id="chart"></div><div id="card"></div></section>
+
+<section><h2>Privacy receipt</h2><p id="rcpt"></p>
+<select id="lang"><option value="en-IN">English</option><option value="hi-IN">हिन्दी</option><option value="kn-IN">ಕನ್ನಡ</option></select>
+<input id="proxy" placeholder="Optional: nudge proxy URL" size="26"><button id="nudge">Preview voice nudge</button><button id="exp">Export my data (JSON)</button><button id="del">Delete everything</button>
+<p class="mut">Voice: your browser's built-in voices by default. Paste the URL of the ElevenLabs proxy from <code>cloud/</code> to hear ElevenLabs instead. It receives only a template name and a language, never health data.</p></section>
+</main>
+<script src="engine.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+let net = 0; const _f = window.fetch; window.fetch = (...a) => { net++; return _f.apply(window, a); };
+const _o = XMLHttpRequest.prototype.open; XMLHttpRequest.prototype.open = function (...a) { net++; return _o.apply(this, a); };
+let S = { plan: CGO.protocol(3, 3, 1), nights: null, result: null };
+const LABEL = { helps: ['Likely helps', 'good'], hurts: ['Likely makes it worse', 'bad'], no_effect: ['No meaningful effect', ''], not_enough: ['Not enough evidence', ''] };
+const NUDGE = { 'en-IN': "Reminder: tonight's experiment habit starts now.", 'hi-IN': 'याद दिलाना: आज रात के प्रयोग की आदत अभी शुरू करें।', 'kn-IN': 'ನೆನಪಿಸುವಿಕೆ: ಇಂದು ರಾತ್ರಿಯ ಪ್ರಯೋಗದ ಅಭ್ಯಾಸವನ್ನು ಈಗ ಪ್ರಾರಂಭಿಸಿ.' };
+
+function plan() { $('plan').innerHTML = S.plan.map((c, i) => `<span class="d ${c}" title="Night ${i + 1}: habit ${c}">${i + 1}</span>`).join('') + '<br><span class="mut">Orange = habit on · Blue = habit off</span>'; }
+function receipt() { $('rcpt').textContent = `Data sent off this device: ${net ? 'only generic nudge requests (template + language)' : 'none'} · Network requests made by this page: ${net} · Stored: in memory only (gone when you close the tab).`; }
+function chart(n) {
+  const w = 640, h = 160, min = Math.min(...n.map(x => x.value)) - 20, max = Math.max(...n.map(x => x.value)), bw = w / n.length;
+  return `<svg viewBox="0 0 ${w} ${h + 22}" width="100%" role="img" aria-label="Minutes asleep per night">` + n.map((x, i) => { const bh = (x.value - min) / (max - min) * h; return `<rect x="${i * bw + 2}" y="${h - bh}" width="${bw - 4}" height="${bh}" rx="3" fill="${x.cond === 'on' ? '#e8892b' : '#3b6fd4'}" opacity="${x.followed ? 1 : 0.3}"><title>Night ${i + 1}: ${x.value} min</title></rect>`; }).join('') + `<text x="0" y="${h + 17}" font-size="12" fill="#555">Minutes asleep per night · faded bars = plan not followed</text></svg>`;
+}
+function show() {
+  const r = S.result, [t, c] = LABEL[r.verdict];
+  const d = r.effect === undefined ? r.reason : `Habit-on nights averaged ${Math.abs(r.effect).toFixed(0)} min ${r.effect >= 0 ? 'more' : 'less'} sleep than habit-off nights (95% range ${r.lo.toFixed(0)} to ${r.hi.toFixed(0)} min).` + (r.verdict === 'not_enough' ? ' That range is too wide to call. Extend the experiment.' : '');
+  $('chart').innerHTML = chart(S.nights);
+  $('card').innerHTML = `<div class="card ${c}"><h3>${t}</h3><p>${d}</p><p class="mut">${r.nOn} habit-on and ${r.nOff} habit-off nights counted · adherence ${(r.adherence * 100).toFixed(0)}%. Evidence from your own data, not proof or medical advice.</p></div>`;
+  $('out').hidden = false; receipt();
+}
+function run(n) { S.nights = n; S.result = CGO.analyze(n); show(); }
+$('gen').onclick = () => { S.plan = CGO.protocol(3, 3, Math.floor(Math.random() * 1e6)); S.nights = S.result = null; $('out').hidden = true; plan(); };
+$('d1').onclick = () => run(CGO.demoData(S.plan, 40));
+$('d0').onclick = () => run(CGO.demoData(S.plan, 0));
+$('go').onclick = () => {
+  const rows = $('csv').value.split('\n').map(l => l.trim().split(',')).filter(p => p[0] && !isNaN(+p[0]));
+  if (rows.length !== S.plan.length) return alert(`Expected ${S.plan.length} nights, found ${rows.length}.`);
+  run(rows.map((p, i) => ({ cond: S.plan[i], value: +p[0], followed: (p[1] || '1').trim() !== '0' })));
+};
+$('nudge').onclick = async () => {
+  const l = $('lang').value, p = $('proxy').value.trim();
+  if (p) {
+    try {
+      const r = await fetch(p, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ template: 'habit_start', lang: l.slice(0, 2) }) });
+      if (!r.ok) throw new Error('proxy error');
+      new Audio(URL.createObjectURL(await r.blob())).play(); receipt(); return;
+    } catch (e) { alert('Proxy failed, using the browser voice instead.'); }
+  }
+  const u = new SpeechSynthesisUtterance(NUDGE[l]); u.lang = l; speechSynthesis.cancel(); speechSynthesis.speak(u); receipt();
+};
+$('exp').onclick = () => { const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([JSON.stringify(S, null, 2)], { type: 'application/json' })); a.download = 'my-experiment.json'; a.click(); };
+$('del').onclick = () => { S.nights = S.result = null; $('csv').value = ''; $('out').hidden = true; receipt(); };
+plan(); receipt();
+</script></body></html>

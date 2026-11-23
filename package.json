@@ -1,0 +1,9 @@
+{
+  "name": "control-group-of-one",
+  "version": "0.1.0",
+  "description": "Privacy-first personal experiment lab: find out what habits actually work for you.",
+  "private": true,
+  "license": "MIT",
+  "scripts": { "test": "node tests/engine.test.js && node tests/nudge-proxy.test.js", "start": "npx serve ." },
+  "engines": { "node": ">=18" }
+}
